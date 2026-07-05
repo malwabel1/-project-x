@@ -18,16 +18,16 @@ const STATUS = {
 
 /**
  * The full, original tabbed library browser (paginated, searchable,
- * infinite-scroll grid) — unchanged in behavior from before Milestone
+ * infinite-scroll grid) -- unchanged in behavior from before Milestone
  * 2, just relocated: it's no longer the default Home view, it's what
  * "View All" from the Watchlist Preview opens. Fully self-contained,
  * including its own Add/Edit form and Details modal, both wired to
  * this screen's own useUserLibrary instance for immediate optimistic
  * updates in its grid.
  *
- * @param {{ userId: string, initialTab?: 'watchlist'|'watching'|'watched', onBack: () => void }} props
+ * @param {{ userId: string, initialTab?: 'watchlist'|'watching'|'watched', onBack: () => void, onOpenDetailsScreen?: (entry: import('../types').LibraryEntry) => void }} props
  */
-export function LibraryScreen({ userId, initialTab = "watching", onBack }) {
+export function LibraryScreen({ userId, initialTab = "watching", onBack, onOpenDetailsScreen }) {
   const [tab, setTab] = useState(initialTab);
   const [query, setQuery] = useState("");
   const [version, setVersion] = useState(0);
@@ -45,6 +45,10 @@ export function LibraryScreen({ userId, initialTab = "watching", onBack }) {
 
   const bumpVersion = () => setVersion((v) => v + 1);
   const detailsEntry = detailsId ? library.items.find((it) => it.id === detailsId) || null : null;
+
+  // Prefer the full-page details screen when App provides it; fall
+  // back to the in-place modal otherwise.
+  const openDetails = (entry) => (onOpenDetailsScreen ? onOpenDetailsScreen(entry) : setDetailsId(entry.id));
 
   async function handleSave(entry) {
     setSaving(true);
@@ -134,7 +138,7 @@ export function LibraryScreen({ userId, initialTab = "watching", onBack }) {
                 key={entry.id}
                 entry={entry}
                 index={i}
-                onOpenDetails={() => setDetailsId(entry.id)}
+                onOpenDetails={() => openDetails(entry)}
                 onEdit={() => {
                   setEditingEntry(entry);
                   setFormOpen(true);
