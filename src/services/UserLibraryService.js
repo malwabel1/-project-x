@@ -144,6 +144,8 @@ export const UserLibraryService = {
    * @param {Partial<import('../types').LibraryEntryInput>} [extra]  status/rating/notes/season/episode for the new entry
    */
   async addTitleFromTmdb(userId, tmdbTitle, extra = {}) {
+    // TEMPORARY trace (step 1) -- remove after tmdb-details 404 is resolved
+    console.log("[TRACE 1] addTitleFromTmdb called. tmdbId:", tmdbTitle.tmdbId, "| tmdb_id:", tmdbTitle.tmdb_id, "| type:", tmdbTitle.type, "| title:", tmdbTitle.title);
     const titleId = await TitlesService.findOrCreateFromTmdb({ ...tmdbTitle, userId });
     await insertTrackingRow(userId, titleId, { status: "watchlist", ...extra });
     ActivityService.log(userId, { titleId, titleName: tmdbTitle.title, action: "added" });
@@ -171,10 +173,14 @@ export const UserLibraryService = {
             ? Number(tmdbTitle.tmdbId ?? tmdbTitle.tmdb_id)
             : null;
 
+    // TEMPORARY trace (step 2 gate) -- remove after tmdb-details 404 is resolved
+    console.log("[TRACE 2] enrichment gate. resolvedTmdbId:", resolvedTmdbId, "| type:", tmdbTitle.type, "| will call fetchAndPersistDetails:", resolvedTmdbId !== null && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv"));
     if (resolvedTmdbId !== null && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv")) {
-      TMDBService.fetchAndPersistDetails(resolvedTmdbId, tmdbTitle.type).catch((e) =>
-        logError(e, "UserLibraryService.addTitleFromTmdb (details enrichment, non-blocking)")
-      );
+      TMDBService.fetchAndPersistDetails(resolvedTmdbId, tmdbTitle.type).catch((e) => {
+        // TEMPORARY trace -- the full error object, not just the friendly message
+        console.log("[TRACE 2b] fetchAndPersistDetails REJECTED:", e, "| cause:", e && e.cause);
+        logError(e, "UserLibraryService.addTitleFromTmdb (details enrichment, non-blocking)");
+      });
     } else {
       // Not throwable (enrichment is best-effort), but worth a log
       // line: a TMDB-sourced add with no resolvable tmdb id means

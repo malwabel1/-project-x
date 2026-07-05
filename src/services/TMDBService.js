@@ -52,11 +52,16 @@ export const TMDBService = {
    * @returns {Promise<{ runtime: number|null, totalEpisodes: number|null, numberOfSeasons: number|null, status: string|null, persisted: boolean }>}
    */
   async fetchAndPersistDetails(tmdbId, type) {
+    // TEMPORARY trace (step 3) -- remove after tmdb-details 404 is resolved
+    console.log("[TRACE 3] fetchAndPersistDetails called. tmdbId:", tmdbId, "| type:", type);
     if (typeof tmdbId !== "number" || (type !== "movie" && type !== "tv")) {
+      console.log("[TRACE 3x] guard REJECTED the input -- execution stops here");
       throw toAppError(new Error("fetchAndPersistDetails: invalid tmdbId/type"), "Couldn't load title details.");
     }
 
     const { data, error } = await TMDBRepository.fetchDetails(tmdbId, type);
+    // TEMPORARY trace (step 5) -- the raw invoke outcome
+    console.log("[TRACE 5] invoke returned. data:", data, "| error:", error, "| error.context (Response):", error && error.context);
     if (error) throw toAppError(error, "Couldn't load title details.");
     if (data?.error) throw toAppError(new Error(data.error), "Couldn't load title details.");
 

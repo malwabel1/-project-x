@@ -28,6 +28,13 @@ export const TMDBRepository = {
    * @returns {Promise<{ data: { details: object, persisted: boolean }|null, error: Error|null }>}
    */
   async fetchDetails(tmdbId, type) {
+    // TEMPORARY trace (step 4) -- remove after tmdb-details 404 is resolved.
+    // This is the EXACT URL invoke() will POST to: the functions host
+    // derived from VITE_SUPABASE_URL + "/functions/v1/" + the slug.
+    const base = import.meta.env.VITE_SUPABASE_URL;
+    console.log("[TRACE 4] fetchDetails called. Base project URL:", base);
+    console.log("[TRACE 4] Expected POST URL:", base ? base.replace(/\/$/, "") + "/functions/v1/tmdb-details" : "(VITE_SUPABASE_URL is EMPTY)");
+    console.log("[TRACE 4] Project ref from URL:", base ? new URL(base).hostname.split(".")[0] : "(none)");
     return supabase.functions.invoke("tmdb-details", { body: { tmdb_id: tmdbId, type } });
   },
 };
