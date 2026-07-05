@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { GlobalTitleSearchService } from "../services/GlobalTitleSearchService";
 import { useDebouncedValue } from "../utils/useDebouncedValue";
 import { logError } from "../utils/errors";
-import { searchDebug } from "../utils/searchDebug"; // TEMPORARY debug -- remove with searchDebug.js
+
 
 /**
  * Drives the "search TMDB" tab of the Add-title form. Debounces
@@ -20,9 +20,6 @@ export function useGlobalTitleSearch(query) {
   const trimmed = debounced.trim();
 
   useEffect(() => {
-    // TEMPORARY debug -- proves the effect ran, and with which value.
-    searchDebug.set("debounced", trimmed);
-    searchDebug.set("effectRan", `yes -- trimmed: "${trimmed}" @ ${new Date().toISOString().slice(11, 23)}`);
 
     if (!trimmed) {
       setResults([]);
