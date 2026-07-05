@@ -1,104 +1,44 @@
 import { supabase } from "../lib/supabaseClient";
-import { traceLog } from "../utils/traceLog"; // TEMPORARY trace
 
 /**
- * TEMPORARY DIAGNOSTIC VERSION - round 2: preflight isolation.
+ * Repository layer for TMDB access. Notably, this does NOT call
+ * api.themoviedb.org - it calls Memora's own `tmdb-search` Supabase
+ * Edge Function, which holds the TMDB API key as a server-side
+ * secret. This file, and therefore the client bundle, never contains
+ * a TMDB credential.
  *
- * Evidence so far: identical POSTs -> search 200, enrich target throws
- * before any Response. The differentiator must be the preflight
- * exchange. Two limits of browser JS shape this round, stated
- * honestly up front:
- *
- *  - A page CANNOT send a real preflight manually (the browser owns
- *    it), and fetch(url, {method:"OPTIONS"}) is itself preflighted.
- *  - Cross-origin response headers are only readable by JS if the
- *    server lists them in Access-Control-Expose-Headers. So probe H
- *    below prints whatever headers the browser EXPOSES - if the
- *    access-control-* values do not appear there, that is a browser
- *    privacy rule, not the server omitting them.
- *
- * So in addition to dumping OPTIONS response headers (your request),
- * this round adds a HEADER BISECTION - probes E/F/G send the same
- * POST with different subsets of request headers. Each subset still
- * forces a preflight (JSON content-type is non-simple), but changes
- * what Access-Control-Request-Headers asks permission for. Whichever
- * header's presence flips the result from "HTTP response" to
- * "TypeError: Load failed" is, by elimination, the header Safari is
- * being denied in the tmdb-enrich preflight.
- *
- *   E: POST enrich  - Content-Type only          (no auth headers)
- *   F: POST enrich  - Content-Type + apikey
- *   G: POST enrich  - Content-Type + Authorization
- *   C: POST enrich  - all three (reference, from round 1)
- *   D: POST search  - all three (control)
- *   H: OPTIONS enrich - dump every exposed response header
- *   I: OPTIONS search - dump every exposed response header
+ * Both operations go through the SAME edge function, routed by the
+ * request body. This is deliberate, not an accident of naming:
+ * separately-deployed enrichment functions (tmdb-details,
+ * tmdb-enrich) were consistently rejected by Safari at the CORS
+ * preflight stage despite identical code and settings, while this
+ * function's preflight has always been accepted. Enrichment was
+ * therefore folded into tmdb-search as a body-routed action
+ * ({ action: "enrich", ... }); CORS never inspects request bodies,
+ * so this cannot re-trigger the failure. Do not split enrichment
+ * back out into its own function without re-testing on iPad Safari.
  */
 export const TMDBRepository = {
+  /**
+   * @param {string} query
+   * @returns {Promise<{ data: { results: any[] }|null, error: Error|null }>}
+   */
   async searchMulti(query) {
     return supabase.functions.invoke("tmdb-search", { body: { query } });
   },
 
+  /**
+   * Triggers server-side details enrichment for one title: the edge
+   * function fetches TMDB's details endpoint and persists
+   * runtime / total_episodes / status into the `titles` row using
+   * the service role. This call just fires it and receives the
+   * fields back.
+   *
+   * @param {number} tmdbId
+   * @param {'movie'|'tv'} type
+   * @returns {Promise<{ data: { details: object, persisted: boolean }|null, error: Error|null }>}
+   */
   async fetchDetails(tmdbId, type) {
-    const base = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
-    const detailsUrl = base + "/functions/v1/tmdb-enrich";
-    const searchUrl = base + "/functions/v1/tmdb-search";
-
-    let bearer = anonKey;
-    try {
-      const { data } = await supabase.auth.getSession();
-      if (data && data.session && data.session.access_token) bearer = data.session.access_token;
-    } catch (e) {
-      traceLog.push("DIAG getSession threw", e);
-    }
-
-    const body = JSON.stringify({ tmdb_id: tmdbId, type });
-    const H_CT = { "Content-Type": "application/json" };
-    const H_CT_KEY = { ...H_CT, "apikey": anonKey };
-    const H_CT_AUTH = { ...H_CT, "Authorization": "Bearer " + bearer };
-    const H_ALL = { ...H_CT, "apikey": anonKey, "Authorization": "Bearer " + bearer };
-
-    traceLog.push("DIAG2 start", { detailsUrl, pageOrigin: window.location.origin });
-
-    await probe("E POST enrich CT-only", detailsUrl, { method: "POST", headers: H_CT, body });
-    await probe("F POST enrich CT+apikey", detailsUrl, { method: "POST", headers: H_CT_KEY, body });
-    await probe("G POST enrich CT+Authorization", detailsUrl, { method: "POST", headers: H_CT_AUTH, body });
-    const c = await probe("C POST enrich ALL headers", detailsUrl, { method: "POST", headers: H_ALL, body });
-    await probe("D POST search ALL headers (control)", searchUrl, { method: "POST", headers: H_ALL, body: JSON.stringify({ query: "diagnostic" }) });
-    await probe("H OPTIONS enrich header dump", detailsUrl, { method: "OPTIONS" });
-    await probe("I OPTIONS search header dump", searchUrl, { method: "OPTIONS" });
-
-    if (c && c.ok) return { data: c.json, error: null };
-    return { data: null, error: new Error(c && c.errorSummary ? c.errorSummary : "diagnostic probe C failed (see overlay)") };
+    return supabase.functions.invoke("tmdb-search", { body: { action: "enrich", tmdb_id: tmdbId, type } });
   },
 };
-
-const WANTED = ["access-control-allow-origin", "access-control-allow-methods", "access-control-allow-headers", "access-control-max-age", "vary", "x-memora-version", "x-request-id", "content-type"];
-
-async function probe(label, url, init) {
-  try {
-    const res = await fetch(url, init);
-    const exposed = {};
-    res.headers.forEach((v, k) => (exposed[k] = v));
-    const wanted = {};
-    for (const k of WANTED) wanted[k] = res.headers.get(k) === null ? "(not exposed to JS or absent)" : res.headers.get(k);
-    let text = "";
-    try { text = await res.text(); } catch (e) { text = "(body read failed: " + e.message + ")"; }
-    let json = null;
-    try { json = JSON.parse(text); } catch (_e) { /* not json */ }
-    traceLog.push("DIAG2 " + label + " -> RESPONSE", {
-      status: res.status,
-      wantedHeaders: wanted,
-      allExposedHeaders: exposed,
-      body: text.slice(0, 250),
-    });
-    return { ok: res.ok, status: res.status, json, errorSummary: "HTTP " + res.status + ": " + text.slice(0, 200) };
-  } catch (err) {
-    traceLog.push("DIAG2 " + label + " -> FETCH THREW (no Response)", {
-      name: err && err.name,
-      message: err && err.message,
-    });
-    return { ok: false, status: null, json: null, errorSummary: (err && err.name) + ": " + (err && err.message) };
-  }
-}
