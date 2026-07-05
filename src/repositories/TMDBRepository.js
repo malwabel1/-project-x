@@ -2,43 +2,49 @@ import { supabase } from "../lib/supabaseClient";
 import { traceLog } from "../utils/traceLog"; // TEMPORARY trace
 
 /**
- * TEMPORARY DIAGNOSTIC VERSION of fetchDetails.
+ * TEMPORARY DIAGNOSTIC VERSION - round 2: preflight isolation.
  *
- * supabase.functions.invoke() is bypassed entirely. In its place, a
- * controlled experiment of four raw browser fetch() probes runs, in
- * order, with every input and outcome pushed to the on-screen
- * TraceOverlay. No interpretation is applied - raw evidence only.
+ * Evidence so far: identical POSTs -> search 200, details throws
+ * before any Response. The differentiator must be the preflight
+ * exchange. Two limits of browser JS shape this round, stated
+ * honestly up front:
  *
- *   PROBE A: GET, zero custom headers -> tmdb-details
- *            (a request the browser sends WITHOUT a CORS preflight)
- *   PROBE B: GET, zero custom headers -> tmdb-search   (control)
- *   PROBE C: POST + authorization/apikey/content-type -> tmdb-details
- *            (byte-equivalent to what invoke() sends; preflight forced)
- *   PROBE D: same POST -> tmdb-search                  (control)
+ *  - A page CANNOT send a real preflight manually (the browser owns
+ *    it), and fetch(url, {method:"OPTIONS"}) is itself preflighted.
+ *  - Cross-origin response headers are only readable by JS if the
+ *    server lists them in Access-Control-Expose-Headers. So probe H
+ *    below prints whatever headers the browser EXPOSES - if the
+ *    access-control-* values do not appear there, that is a browser
+ *    privacy rule, not the server omitting them.
  *
- * The return value is built from PROBE C so the app keeps working
- * if C succeeds. searchMulti is untouched.
+ * So in addition to dumping OPTIONS response headers (your request),
+ * this round adds a HEADER BISECTION - probes E/F/G send the same
+ * POST with different subsets of request headers. Each subset still
+ * forces a preflight (JSON content-type is non-simple), but changes
+ * what Access-Control-Request-Headers asks permission for. Whichever
+ * header's presence flips the result from "HTTP response" to
+ * "TypeError: Load failed" is, by elimination, the header Safari is
+ * being denied in the tmdb-details preflight.
+ *
+ *   E: POST details - Content-Type only          (no auth headers)
+ *   F: POST details - Content-Type + apikey
+ *   G: POST details - Content-Type + Authorization
+ *   C: POST details - all three (reference, from round 1)
+ *   D: POST search  - all three (control)
+ *   H: OPTIONS details - dump every exposed response header
+ *   I: OPTIONS search  - dump every exposed response header
  */
 export const TMDBRepository = {
-  /**
-   * @param {string} query
-   */
   async searchMulti(query) {
     return supabase.functions.invoke("tmdb-search", { body: { query } });
   },
 
-  /**
-   * @param {number} tmdbId
-   * @param {'movie'|'tv'} type
-   */
   async fetchDetails(tmdbId, type) {
     const base = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
     const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
     const detailsUrl = base + "/functions/v1/tmdb-details";
     const searchUrl = base + "/functions/v1/tmdb-search";
 
-    // The same bearer token invoke() would attach: the session token
-    // when signed in, else the anon key.
     let bearer = anonKey;
     try {
       const { data } = await supabase.auth.getSession();
@@ -48,63 +54,50 @@ export const TMDBRepository = {
     }
 
     const body = JSON.stringify({ tmdb_id: tmdbId, type });
-    const fullHeaders = {
-      "Authorization": "Bearer " + bearer,
-      "apikey": anonKey,
-      "Content-Type": "application/json",
-    };
+    const H_CT = { "Content-Type": "application/json" };
+    const H_CT_KEY = { ...H_CT, "apikey": anonKey };
+    const H_CT_AUTH = { ...H_CT, "Authorization": "Bearer " + bearer };
+    const H_ALL = { ...H_CT, "apikey": anonKey, "Authorization": "Bearer " + bearer };
 
-    traceLog.push("DIAG start", {
-      detailsUrl,
-      searchUrl,
-      body,
-      headerNames: Object.keys(fullHeaders),
-      bearerKind: bearer === anonKey ? "anon" : "session",
-      pageOrigin: window.location.origin,
-    });
+    traceLog.push("DIAG2 start", { detailsUrl, pageOrigin: window.location.origin });
 
-    await probe("A GET no-headers tmdb-details", detailsUrl, { method: "GET" });
-    await probe("B GET no-headers tmdb-search", searchUrl, { method: "GET" });
-    const c = await probe("C POST full-headers tmdb-details", detailsUrl, { method: "POST", headers: fullHeaders, body });
-    await probe("D POST full-headers tmdb-search", searchUrl, { method: "POST", headers: fullHeaders, body: JSON.stringify({ query: "diagnostic" }) });
+    await probe("E POST details CT-only", detailsUrl, { method: "POST", headers: H_CT, body });
+    await probe("F POST details CT+apikey", detailsUrl, { method: "POST", headers: H_CT_KEY, body });
+    await probe("G POST details CT+Authorization", detailsUrl, { method: "POST", headers: H_CT_AUTH, body });
+    const c = await probe("C POST details ALL headers", detailsUrl, { method: "POST", headers: H_ALL, body });
+    await probe("D POST search ALL headers (control)", searchUrl, { method: "POST", headers: H_ALL, body: JSON.stringify({ query: "diagnostic" }) });
+    await probe("H OPTIONS details header dump", detailsUrl, { method: "OPTIONS" });
+    await probe("I OPTIONS search header dump", searchUrl, { method: "OPTIONS" });
 
-    // Feed PROBE C's outcome back to the app in invoke()'s shape.
     if (c && c.ok) return { data: c.json, error: null };
     return { data: null, error: new Error(c && c.errorSummary ? c.errorSummary : "diagnostic probe C failed (see overlay)") };
   },
 };
 
+const WANTED = ["access-control-allow-origin", "access-control-allow-methods", "access-control-allow-headers", "access-control-max-age", "vary", "x-memora-version", "x-request-id", "content-type"];
+
 async function probe(label, url, init) {
   try {
     const res = await fetch(url, init);
-    const headers = {};
-    res.headers.forEach((v, k) => (headers[k] = v));
+    const exposed = {};
+    res.headers.forEach((v, k) => (exposed[k] = v));
+    const wanted = {};
+    for (const k of WANTED) wanted[k] = res.headers.get(k) === null ? "(not exposed to JS or absent)" : res.headers.get(k);
     let text = "";
-    try {
-      text = await res.text();
-    } catch (e) {
-      text = "(body read failed: " + e.message + ")";
-    }
+    try { text = await res.text(); } catch (e) { text = "(body read failed: " + e.message + ")"; }
     let json = null;
-    try {
-      json = JSON.parse(text);
-    } catch (_e) {
-      /* not json */
-    }
-    traceLog.push("DIAG " + label + " -> RESPONSE", {
+    try { json = JSON.parse(text); } catch (_e) { /* not json */ }
+    traceLog.push("DIAG2 " + label + " -> RESPONSE", {
       status: res.status,
-      statusText: res.statusText,
-      type: res.type,
-      url: res.url,
-      headers,
-      body: text.slice(0, 400),
+      wantedHeaders: wanted,
+      allExposedHeaders: exposed,
+      body: text.slice(0, 250),
     });
     return { ok: res.ok, status: res.status, json, errorSummary: "HTTP " + res.status + ": " + text.slice(0, 200) };
   } catch (err) {
-    traceLog.push("DIAG " + label + " -> FETCH THREW (no Response exists)", {
+    traceLog.push("DIAG2 " + label + " -> FETCH THREW (no Response)", {
       name: err && err.name,
       message: err && err.message,
-      stack: err && err.stack ? String(err.stack).slice(0, 300) : "(none)",
     });
     return { ok: false, status: null, json: null, errorSummary: (err && err.name) + ": " + (err && err.message) };
   }
