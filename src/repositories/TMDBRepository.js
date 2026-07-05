@@ -4,7 +4,7 @@ import { traceLog } from "../utils/traceLog"; // TEMPORARY trace
 /**
  * TEMPORARY DIAGNOSTIC VERSION - round 2: preflight isolation.
  *
- * Evidence so far: identical POSTs -> search 200, details throws
+ * Evidence so far: identical POSTs -> search 200, enrich target throws
  * before any Response. The differentiator must be the preflight
  * exchange. Two limits of browser JS shape this round, stated
  * honestly up front:
@@ -24,15 +24,15 @@ import { traceLog } from "../utils/traceLog"; // TEMPORARY trace
  * what Access-Control-Request-Headers asks permission for. Whichever
  * header's presence flips the result from "HTTP response" to
  * "TypeError: Load failed" is, by elimination, the header Safari is
- * being denied in the tmdb-details preflight.
+ * being denied in the tmdb-enrich preflight.
  *
- *   E: POST details - Content-Type only          (no auth headers)
- *   F: POST details - Content-Type + apikey
- *   G: POST details - Content-Type + Authorization
- *   C: POST details - all three (reference, from round 1)
+ *   E: POST enrich  - Content-Type only          (no auth headers)
+ *   F: POST enrich  - Content-Type + apikey
+ *   G: POST enrich  - Content-Type + Authorization
+ *   C: POST enrich  - all three (reference, from round 1)
  *   D: POST search  - all three (control)
- *   H: OPTIONS details - dump every exposed response header
- *   I: OPTIONS search  - dump every exposed response header
+ *   H: OPTIONS enrich - dump every exposed response header
+ *   I: OPTIONS search - dump every exposed response header
  */
 export const TMDBRepository = {
   async searchMulti(query) {
@@ -42,7 +42,7 @@ export const TMDBRepository = {
   async fetchDetails(tmdbId, type) {
     const base = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
     const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
-    const detailsUrl = base + "/functions/v1/tmdb-details";
+    const detailsUrl = base + "/functions/v1/tmdb-enrich";
     const searchUrl = base + "/functions/v1/tmdb-search";
 
     let bearer = anonKey;
@@ -61,12 +61,12 @@ export const TMDBRepository = {
 
     traceLog.push("DIAG2 start", { detailsUrl, pageOrigin: window.location.origin });
 
-    await probe("E POST details CT-only", detailsUrl, { method: "POST", headers: H_CT, body });
-    await probe("F POST details CT+apikey", detailsUrl, { method: "POST", headers: H_CT_KEY, body });
-    await probe("G POST details CT+Authorization", detailsUrl, { method: "POST", headers: H_CT_AUTH, body });
-    const c = await probe("C POST details ALL headers", detailsUrl, { method: "POST", headers: H_ALL, body });
+    await probe("E POST enrich CT-only", detailsUrl, { method: "POST", headers: H_CT, body });
+    await probe("F POST enrich CT+apikey", detailsUrl, { method: "POST", headers: H_CT_KEY, body });
+    await probe("G POST enrich CT+Authorization", detailsUrl, { method: "POST", headers: H_CT_AUTH, body });
+    const c = await probe("C POST enrich ALL headers", detailsUrl, { method: "POST", headers: H_ALL, body });
     await probe("D POST search ALL headers (control)", searchUrl, { method: "POST", headers: H_ALL, body: JSON.stringify({ query: "diagnostic" }) });
-    await probe("H OPTIONS details header dump", detailsUrl, { method: "OPTIONS" });
+    await probe("H OPTIONS enrich header dump", detailsUrl, { method: "OPTIONS" });
     await probe("I OPTIONS search header dump", searchUrl, { method: "OPTIONS" });
 
     if (c && c.ok) return { data: c.json, error: null };
