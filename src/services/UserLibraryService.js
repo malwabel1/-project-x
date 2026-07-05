@@ -1,16 +1,17 @@
 import { UserLibraryRepository } from "../repositories/UserLibraryRepository";
 import { TitlesService } from "./TitlesService";
 import { ActivityService } from "./ActivityService";
-import { AppError, toAppError } from "../utils/errors";
+import { TMDBService } from "./TMDBService";
+import { AppError, toAppError, logError } from "../utils/errors";
 import { cache, libraryCacheKey } from "../utils/cache";
 
 /**
- * Service layer for `user_titles`. Hooks call this — never the
+ * Service layer for `user_titles`. Hooks call this -- never the
  * repository or supabase directly. This is also where cross-cutting
  * concerns live: mapping DB rows to `LibraryEntry` objects, the
  * read-through cache fallback, turning repository errors into
  * AppError, and (Milestone 2) logging Recent Activity alongside each
- * mutation via ActivityService — a service composing another
+ * mutation via ActivityService -- a service composing another
  * service, the same pattern already used for TitlesService.
  */
 
@@ -46,10 +47,10 @@ export const UserLibraryService = {
   /**
    * Fetches one page of a user's library, optionally filtered by
    * status and/or a server-side title search. Passing `status` as
-   * null/undefined returns titles across every status — used by the
+   * null/undefined returns titles across every status -- used by the
    * Recently Added row on Home, which isn't scoped to one tab.
    * Falls back to the last cached page-0 result if the network
-   * request fails (offline scaffold — see utils/cache.js).
+   * request fails (offline scaffold -- see utils/cache.js).
    * @param {{ userId: string, status?: import('../types').LibraryStatus|null, search?: string, page: number, pageSize: number }} params
    * @returns {Promise<import('../types').Page>}
    */
@@ -69,7 +70,7 @@ export const UserLibraryService = {
 
       const items = data.map(toLibraryEntry);
 
-      // Cache only the first, unfiltered page per status — enough
+      // Cache only the first, unfiltered page per status -- enough
       // to show *something* offline without caching every search
       // permutation.
       if (page === 0 && !search && cacheKey) cache.set(cacheKey, items);
@@ -146,6 +147,19 @@ export const UserLibraryService = {
     const titleId = await TitlesService.findOrCreateFromTmdb({ ...tmdbTitle, userId });
     await insertTrackingRow(userId, titleId, { status: "watchlist", ...extra });
     ActivityService.log(userId, { titleId, titleName: tmdbTitle.title, action: "added" });
+
+    // Fire-and-forget enrichment (same philosophy as ActivityService.log
+    // above): the tmdb-details Edge Function fetches runtime /
+    // total_episodes / status from TMDB and persists them into the
+    // `titles` row server-side. Deliberately NOT awaited -- the add is
+    // already complete and must never be blocked or failed by
+    // enrichment; on error we only log. Enriched fields appear the
+    // next time the entry is fetched (screens refetch on remount).
+    if (typeof tmdbTitle.tmdbId === "number" && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv")) {
+      TMDBService.fetchAndPersistDetails(tmdbTitle.tmdbId, tmdbTitle.type).catch((e) =>
+        logError(e, "UserLibraryService.addTitleFromTmdb (details enrichment, non-blocking)")
+      );
+    }
   },
 
   /**
@@ -155,7 +169,7 @@ export const UserLibraryService = {
    */
   async updateEntry(userId, userTitleId, patch) {
     // Only fetched when needed for activity logging (status/rating
-    // changes) — notes-only or season/episode-only edits skip this
+    // changes) -- notes-only or season/episode-only edits skip this
     // extra read entirely.
     let previous = null;
     if (patch.status !== undefined || patch.rating !== undefined) {
@@ -232,8 +246,8 @@ export const UserLibraryService = {
 
 /**
  * Shared by addTitle and addTitleFromTmdb: checks for an existing
- * (user, title) tracking row first so the common case — a user
- * re-adding something already tracked — gets the friendly message
+ * (user, title) tracking row first so the common case -- a user
+ * re-adding something already tracked -- gets the friendly message
  * below instead of a raw database error, then inserts via the
  * duplicate-safe upsert as a fallback for the rare race between the
  * check and the write.
@@ -261,7 +275,7 @@ async function insertTrackingRow(userId, titleId, entry) {
 
   // Belt-and-suspenders: ignoreDuplicates means a genuine race (two
   // inserts for the same user+title landing at once) resolves with
-  // no row and no error rather than a 23505 — surface the same
+  // no row and no error rather than a 23505 -- surface the same
   // friendly message instead of silently doing nothing.
   if (!data || data.length === 0) {
     throw new AppError("This title is already in your library.", { code: "DUPLICATE_LIBRARY_ENTRY" });
