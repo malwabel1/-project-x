@@ -7,6 +7,7 @@ import { LibraryScreen } from "./components/LibraryScreen";
 import { SearchScreen } from "./components/SearchScreen";
 import { ProfileScreen } from "./components/ProfileScreen";
 import { SettingsScreen } from "./components/SettingsScreen";
+import { TitleDetailsScreen } from "./components/TitleDetailsScreen";
 import { BottomNav } from "./components/BottomNav";
 import { LoadingState } from "./components/StateViews";
 import { FilmstripIcon } from "./components/Shared";
@@ -31,23 +32,25 @@ export default function App() {
 
 /**
  * Top-level shell (Milestone 2): a thin screen switcher plus bottom
- * navigation. Deliberately owns no data hooks of its own — every
+ * navigation. Deliberately owns no data hooks of its own -- every
  * screen (HomeScreen, LibraryScreen, SearchScreen, ProfileScreen,
  * SettingsScreen) is fully self-contained, owning whichever
  * repository→service→hook chain it needs. That keeps this file
  * simple and means each screen's data only loads while that screen
  * is actually mounted.
  *
- * "Library" isn't a bottom-nav destination — the bottom nav is
- * exactly Home / Search / Profile / Settings, per spec — it's reached
+ * "Library" isn't a bottom-nav destination -- the bottom nav is
+ * exactly Home / Search / Profile / Settings, per spec -- it's reached
  * via "View All" from the Watchlist Preview, and remounts fresh
  * (via the `key`) every time it's entered so it never shows stale
  * data from a previous visit.
  */
 function MemoraApp({ user, onSignOut }) {
-  const [screen, setScreen] = useState("home"); // 'home' | 'library' | 'search' | 'profile' | 'settings'
+  const [screen, setScreen] = useState("home"); // 'home' | 'library' | 'search' | 'profile' | 'settings' | 'details'
   const [libraryTab, setLibraryTab] = useState("watching");
   const [libraryKey, setLibraryKey] = useState(0);
+  const [detailsEntry, setDetailsEntry] = useState(null); // LibraryEntry shown by TitleDetailsScreen
+  const [detailsReturnTo, setDetailsReturnTo] = useState("home"); // where Back goes
   const isLargeDesktop = useMediaQuery(BREAKPOINTS.largeDesktop);
 
   function goToLibrary(tab) {
@@ -58,6 +61,19 @@ function MemoraApp({ user, onSignOut }) {
 
   function navigate(next) {
     setScreen(next);
+  }
+
+  // Any screen can hand an entry here to open the full details page;
+  // Back returns to whichever screen the person came from.
+  function openDetailsScreen(entry) {
+    setDetailsEntry(entry);
+    setDetailsReturnTo(screen);
+    setScreen("details");
+  }
+
+  function closeDetailsScreen() {
+    setScreen(detailsReturnTo);
+    setDetailsEntry(null);
   }
 
   return (
@@ -78,17 +94,31 @@ function MemoraApp({ user, onSignOut }) {
       <main style={{ ...styles.main, maxWidth: isLargeDesktop ? 1100 : undefined }}>
         <div key={screen} className="memora-page-in">
           {screen === "home" && (
-            <HomeScreen userId={user.id} onViewWatchlist={() => goToLibrary("watchlist")} onViewProfile={() => navigate("profile")} />
+            <HomeScreen
+              userId={user.id}
+              onViewWatchlist={() => goToLibrary("watchlist")}
+              onViewProfile={() => navigate("profile")}
+              onOpenDetailsScreen={openDetailsScreen}
+            />
           )}
-          {screen === "library" && <LibraryScreen key={libraryKey} userId={user.id} initialTab={libraryTab} onBack={() => navigate("home")} />}
+          {screen === "library" && (
+            <LibraryScreen
+              key={libraryKey}
+              userId={user.id}
+              initialTab={libraryTab}
+              onBack={() => navigate("home")}
+              onOpenDetailsScreen={openDetailsScreen}
+            />
+          )}
           {screen === "search" && <SearchScreen userId={user.id} />}
           {screen === "profile" && <ProfileScreen user={user} />}
           {screen === "settings" && <SettingsScreen onSignOut={onSignOut} />}
+          {screen === "details" && detailsEntry && <TitleDetailsScreen entry={detailsEntry} onBack={closeDetailsScreen} />}
         </div>
       </main>
 
       <div style={styles.bottomNavSpacer} />
-      <BottomNav current={screen} onNavigate={navigate} />
+      <BottomNav current={screen === "details" ? detailsReturnTo : screen} onNavigate={navigate} />
     </>
   );
 }
