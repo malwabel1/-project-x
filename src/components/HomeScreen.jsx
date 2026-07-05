@@ -18,13 +18,13 @@ import { FilmstripIcon } from "./Shared";
 /**
  * Home dashboard (Milestone 2). Composes five sections in the
  * required order: Continue Watching, Recently Added, Quick Stats,
- * Watchlist Preview, Recent Activity. Fully self-contained — owns
+ * Watchlist Preview, Recent Activity. Fully self-contained -- owns
  * every hook it needs, same pattern as LibraryScreen/ProfileScreen/
  * SearchScreen, so App.jsx stays a thin screen switcher.
  *
- * @param {{ userId: string, onViewWatchlist: () => void, onViewProfile: () => void }} props
+ * @param {{ userId: string, onViewWatchlist: () => void, onViewProfile: () => void, onOpenDetailsScreen?: (entry: import('../types').LibraryEntry) => void }} props
  */
-export function HomeScreen({ userId, onViewWatchlist, onViewProfile }) {
+export function HomeScreen({ userId, onViewWatchlist, onViewProfile, onOpenDetailsScreen }) {
   const [formOpen, setFormOpen] = useState(false);
   const [detailsId, setDetailsId] = useState(null);
   const [version, setVersion] = useState(0);
@@ -66,7 +66,12 @@ export function HomeScreen({ userId, onViewWatchlist, onViewProfile }) {
     if (ok) refreshAll();
   }
 
-  // A card can come from any of the three rows — check all three,
+  // Prefer the full-page details screen (Milestone: Title Details)
+  // when App provides it; fall back to the in-place modal otherwise,
+  // so this component keeps working unchanged if rendered standalone.
+  const openDetails = (entry) => (onOpenDetailsScreen ? onOpenDetailsScreen(entry) : setDetailsId(entry.id));
+
+  // A card can come from any of the three rows -- check all three,
   // newest-added first since that's the most likely source.
   const detailsEntry = detailsId
     ? recentlyAdded.items.find((it) => it.id === detailsId) ||
@@ -102,17 +107,17 @@ export function HomeScreen({ userId, onViewWatchlist, onViewProfile }) {
         </div>
       ) : (
         <>
-          <ContinueWatchingRow items={continueWatchingTv} onOpenDetails={(entry) => setDetailsId(entry.id)} />
+          <ContinueWatchingRow items={continueWatchingTv} onOpenDetails={openDetails} />
 
           {recentlyAdded.loading ? (
             <LoadingState label="Loading your library…" />
           ) : (
-            <RecentlyAddedRow items={recentlyAddedTop} onOpenDetails={(entry) => setDetailsId(entry.id)} />
+            <RecentlyAddedRow items={recentlyAddedTop} onOpenDetails={openDetails} />
           )}
 
           {!stats.loading && <QuickStatsRow titles={stats.titles} onViewProfile={onViewProfile} />}
 
-          <WatchlistPreviewRow items={watchlistTop} onOpenDetails={(entry) => setDetailsId(entry.id)} onViewAll={onViewWatchlist} />
+          <WatchlistPreviewRow items={watchlistTop} onOpenDetails={openDetails} onViewAll={onViewWatchlist} />
 
           <RecentActivityFeed items={activity.items} />
         </>
