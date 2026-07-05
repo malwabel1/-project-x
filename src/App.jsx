@@ -12,6 +12,7 @@ import { BottomNav } from "./components/BottomNav";
 import { LoadingState } from "./components/StateViews";
 import { FilmstripIcon } from "./components/Shared";
 import { styles } from "./styles";
+import { TraceOverlay } from "./components/TraceOverlay"; // TEMPORARY trace -- remove with traceLog.js
 
 export default function App() {
   const { user, loading: authLoading, error: authError, signIn, signUp, signOut } = useAuth();
@@ -137,6 +138,8 @@ function MemoraApp({ user, onSignOut }) {
 
       <div style={styles.bottomNavSpacer} />
       <BottomNav current={screen === "details" ? detailsReturnTo : screen} onNavigate={navigate} />
+      {/* TEMPORARY trace -- remove with traceLog.js */}
+      <TraceOverlay />
     </>
   );
 }

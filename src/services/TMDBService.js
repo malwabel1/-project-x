@@ -1,5 +1,6 @@
 import { TMDBRepository } from "../repositories/TMDBRepository";
 import { toAppError } from "../utils/errors";
+import { traceLog } from "../utils/traceLog"; // TEMPORARY trace
 
 /**
  * Service layer for TMDB. Hooks/components never call TMDBRepository
@@ -53,15 +54,15 @@ export const TMDBService = {
    */
   async fetchAndPersistDetails(tmdbId, type) {
     // TEMPORARY trace (step 3) -- remove after tmdb-details 404 is resolved
-    console.log("[TRACE 3] fetchAndPersistDetails called. tmdbId:", tmdbId, "| type:", type);
+    traceLog.push("3 fetchAndPersistDetails", { tmdbId, type });
     if (typeof tmdbId !== "number" || (type !== "movie" && type !== "tv")) {
-      console.log("[TRACE 3x] guard REJECTED the input -- execution stops here");
+      traceLog.push("3x guard REJECTED", { tmdbId, type });
       throw toAppError(new Error("fetchAndPersistDetails: invalid tmdbId/type"), "Couldn't load title details.");
     }
 
     const { data, error } = await TMDBRepository.fetchDetails(tmdbId, type);
     // TEMPORARY trace (step 5) -- the raw invoke outcome
-    console.log("[TRACE 5] invoke returned. data:", data, "| error:", error, "| error.context (Response):", error && error.context);
+    traceLog.push("5 invoke returned", error ? error : data);
     if (error) throw toAppError(error, "Couldn't load title details.");
     if (data?.error) throw toAppError(new Error(data.error), "Couldn't load title details.");
 

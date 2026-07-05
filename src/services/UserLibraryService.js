@@ -4,6 +4,7 @@ import { ActivityService } from "./ActivityService";
 import { TMDBService } from "./TMDBService";
 import { AppError, toAppError, logError } from "../utils/errors";
 import { cache, libraryCacheKey } from "../utils/cache";
+import { traceLog } from "../utils/traceLog"; // TEMPORARY trace
 
 /**
  * Service layer for `user_titles`. Hooks call this -- never the
@@ -145,7 +146,7 @@ export const UserLibraryService = {
    */
   async addTitleFromTmdb(userId, tmdbTitle, extra = {}) {
     // TEMPORARY trace (step 1) -- remove after tmdb-details 404 is resolved
-    console.log("[TRACE 1] addTitleFromTmdb called. tmdbId:", tmdbTitle.tmdbId, "| tmdb_id:", tmdbTitle.tmdb_id, "| type:", tmdbTitle.type, "| title:", tmdbTitle.title);
+    traceLog.push("1 addTitleFromTmdb", { tmdbId: tmdbTitle.tmdbId, tmdb_id: tmdbTitle.tmdb_id, type: tmdbTitle.type, title: tmdbTitle.title });
     const titleId = await TitlesService.findOrCreateFromTmdb({ ...tmdbTitle, userId });
     await insertTrackingRow(userId, titleId, { status: "watchlist", ...extra });
     ActivityService.log(userId, { titleId, titleName: tmdbTitle.title, action: "added" });
@@ -174,11 +175,11 @@ export const UserLibraryService = {
             : null;
 
     // TEMPORARY trace (step 2 gate) -- remove after tmdb-details 404 is resolved
-    console.log("[TRACE 2] enrichment gate. resolvedTmdbId:", resolvedTmdbId, "| type:", tmdbTitle.type, "| will call fetchAndPersistDetails:", resolvedTmdbId !== null && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv"));
+    traceLog.push("2 enrichment gate", { resolvedTmdbId, type: tmdbTitle.type, willCall: resolvedTmdbId !== null && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv") });
     if (resolvedTmdbId !== null && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv")) {
       TMDBService.fetchAndPersistDetails(resolvedTmdbId, tmdbTitle.type).catch((e) => {
         // TEMPORARY trace -- the full error object, not just the friendly message
-        console.log("[TRACE 2b] fetchAndPersistDetails REJECTED:", e, "| cause:", e && e.cause);
+        traceLog.push("2b enrichment REJECTED", e);
         logError(e, "UserLibraryService.addTitleFromTmdb (details enrichment, non-blocking)");
       });
     } else {
