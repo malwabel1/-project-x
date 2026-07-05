@@ -155,9 +155,34 @@ export const UserLibraryService = {
     // already complete and must never be blocked or failed by
     // enrichment; on error we only log. Enriched fields appear the
     // next time the entry is fetched (screens refetch on remount).
-    if (typeof tmdbTitle.tmdbId === "number" && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv")) {
-      TMDBService.fetchAndPersistDetails(tmdbTitle.tmdbId, tmdbTitle.type).catch((e) =>
+    //
+    // Defensive id resolution: both mapped Title shapes in this
+    // project emit camelCase `tmdbId` (TMDBService.toTitle and
+    // GlobalTitleSearchService.toTitle), but a raw edge-function row
+    // or cached/older object could still carry snake_case `tmdb_id`.
+    // Accept either so enrichment never silently no-ops on a valid
+    // title, and coerce numeric strings ("157336") to numbers.
+    const resolvedTmdbId =
+      typeof tmdbTitle.tmdbId === "number"
+        ? tmdbTitle.tmdbId
+        : typeof tmdbTitle.tmdb_id === "number"
+          ? tmdbTitle.tmdb_id
+          : Number.isFinite(Number(tmdbTitle.tmdbId ?? tmdbTitle.tmdb_id))
+            ? Number(tmdbTitle.tmdbId ?? tmdbTitle.tmdb_id)
+            : null;
+
+    if (resolvedTmdbId !== null && (tmdbTitle.type === "movie" || tmdbTitle.type === "tv")) {
+      TMDBService.fetchAndPersistDetails(resolvedTmdbId, tmdbTitle.type).catch((e) =>
         logError(e, "UserLibraryService.addTitleFromTmdb (details enrichment, non-blocking)")
+      );
+    } else {
+      // Not throwable (enrichment is best-effort), but worth a log
+      // line: a TMDB-sourced add with no resolvable tmdb id means
+      // enrichment is being skipped, which is exactly the symptom
+      // being debugged if it ever recurs.
+      logError(
+        new Error("addTitleFromTmdb: no resolvable tmdb id (got tmdbId=" + tmdbTitle.tmdbId + ", tmdb_id=" + tmdbTitle.tmdb_id + ", type=" + tmdbTitle.type + ")"),
+        "UserLibraryService.addTitleFromTmdb (enrichment skipped)"
       );
     }
   },
