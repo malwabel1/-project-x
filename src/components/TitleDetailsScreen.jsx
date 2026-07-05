@@ -3,41 +3,60 @@ import { ArrowLeft, Film, Tv, Star, Play, CheckCircle2, Bookmark, RotateCcw } fr
 import { styles } from "../styles";
 import { PosterImage } from "./PosterImage";
 import { colorForTitle } from "./Shared";
+import { useLibraryMutations } from "../hooks/useLibraryMutations";
+import { ErrorBanner } from "./StateViews";
 
 /**
  * Full-page Title Details screen (as opposed to TitleDetailsModal,
- * which remains in the codebase untouched). Purely presentational:
- * receives a LibraryEntry and renders it -- no service, repository,
- * or supabase import, consistent with every other component.
+ * which remains in the codebase untouched).
  *
- * The four action buttons are UI-only for now, per spec: they hold
- * a local "selected" highlight (initialized from the entry's current
- * status where one maps cleanly) but persist nothing. Wiring them to
- * UserLibraryService via the owning screen's hook is the documented
- * next step -- the `onAction` prop is already threaded for it.
+ * Action buttons are now wired to real status updates, following the
+ * same self-contained-screen pattern as every other screen: this
+ * component owns its own useLibraryMutations instance (write-only --
+ * no list to paginate here) and calls the existing
+ * UserLibraryService.updateEntry flow through it. No new service, no
+ * schema change.
  *
- * Field notes, stated honestly rather than papered over:
- * - Genres: the schema stores a single `genre` string (set for
- *   manual entries; TMDB search results don't include genre names
- *   without a details-endpoint call). Shown when present, omitted
- *   when null -- no fabricated placeholder chips.
- * - Runtime/Seasons: `runtimeMinutes` shows for movies when known;
- *   TV shows show current progress + total episodes when known.
- *   TMDB-sourced titles won't have runtime until a /movie|tv/{id}
- *   details call is added (documented limitation since the TMDB
- *   integration milestone).
+ * Build-safety / backwards compatibility: `userId` is optional. If
+ * it isn't passed (i.e. App.jsx hasn't been updated yet), the
+ * buttons behave exactly as before -- local highlight only, no
+ * persistence -- so this file can be applied first without breaking
+ * anything.
+ *
+ * Status mapping:
+ *   Watching      → status "watching"
+ *   Completed     → status "watched"
+ *   Plan to Watch → status "watchlist"
+ *   Rewatch       → UI-only. The schema's status check constraint
+ *                   allows exactly watchlist/watching/watched -- there
+ *                   is no "rewatch" state to persist without a schema
+ *                   change, which this step explicitly avoids. The
+ *                   button still highlights locally so the UI feels
+ *                   responsive, and is labeled in-code for the future.
  *
  * @param {{
  *   entry: import('../types').LibraryEntry,
  *   onBack: () => void,
- *   onAction?: (action: 'watching'|'completed'|'plan'|'rewatch') => void,
+ *   userId?: string,
+ *   onStatusChanged?: () => void,
  * }} props
  */
-export function TitleDetailsScreen({ entry, onBack, onAction }) {
+export function TitleDetailsScreen({ entry, onBack, userId, onStatusChanged }) {
   const isTv = entry.type === "tv";
   const color = colorForTitle(entry.title);
   const [selectedAction, setSelectedAction] = useState(initialAction(entry.status));
   const [backdropLoaded, setBackdropLoaded] = useState(false);
+  const [savedNotice, setSavedNotice] = useState(false);
+
+  const mutations = useLibraryMutations(userId || "");
+  const canPersist = !!userId;
+
+  const ACTION_TO_STATUS = {
+    watching: "watching",
+    completed: "watched",
+    plan: "watchlist",
+    // rewatch: intentionally absent -- see the doc comment above.
+  };
 
   const actions = [
     { key: "watching", label: "Watching", icon: Play },
@@ -46,9 +65,21 @@ export function TitleDetailsScreen({ entry, onBack, onAction }) {
     { key: "rewatch", label: "Rewatch", icon: RotateCcw },
   ];
 
-  function handleAction(key) {
-    setSelectedAction(key); // UI-only highlight for now
-    onAction?.(key);
+  async function handleAction(key) {
+    const previous = selectedAction;
+    setSelectedAction(key); // optimistic highlight
+    setSavedNotice(false);
+
+    const status = ACTION_TO_STATUS[key];
+    if (!status || !canPersist) return; // rewatch, or App not yet passing userId
+
+    const ok = await mutations.updateEntry(entry.id, { status });
+    if (ok) {
+      setSavedNotice(true);
+      onStatusChanged?.();
+    } else {
+      setSelectedAction(previous); // roll back the highlight on failure
+    }
   }
 
   return (
@@ -110,7 +141,7 @@ export function TitleDetailsScreen({ entry, onBack, onAction }) {
         {entry.genre && <span style={{ ...styles.detailsBadge, color: "#4FB3A9" }}>{entry.genre}</span>}
       </div>
 
-      {/* Action buttons -- UI only for now */}
+      {/* Action buttons -- wired to real status updates (Rewatch UI-only) */}
       <div style={styles.detailsScreenActions}>
         {actions.map(({ key, label, icon: Icon }) => {
           const active = selectedAction === key;
@@ -118,8 +149,13 @@ export function TitleDetailsScreen({ entry, onBack, onAction }) {
             <button
               key={key}
               type="button"
-              style={{ ...styles.detailsScreenActionBtn, ...(active ? styles.detailsScreenActionBtnActive : {}) }}
+              style={{
+                ...styles.detailsScreenActionBtn,
+                ...(active ? styles.detailsScreenActionBtnActive : {}),
+                ...(mutations.saving ? { opacity: 0.6, cursor: "wait" } : {}),
+              }}
               onClick={() => handleAction(key)}
+              disabled={mutations.saving}
               aria-pressed={active}
             >
               <Icon size={15} strokeWidth={2.2} />
@@ -127,6 +163,16 @@ export function TitleDetailsScreen({ entry, onBack, onAction }) {
             </button>
           );
         })}
+      </div>
+
+      {/* Save feedback */}
+      <div style={{ padding: "10px 20px 0" }}>
+        <ErrorBanner message={mutations.error} />
+        {savedNotice && !mutations.error && (
+          <p style={{ margin: 0, fontSize: 12.5, color: "#4FB3A9" }} role="status">
+            Saved to your library.
+          </p>
+        )}
       </div>
 
       {/* Overview */}
