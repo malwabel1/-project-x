@@ -1,11 +1,11 @@
 import { supabase } from "../lib/supabaseClient";
-import { searchDebug, debugFormat } from "../utils/searchDebug"; // TEMPORARY debug
+
 /**
  * Repository layer for TMDB access. Notably, this does NOT call
- * api.themoviedb.org — it calls Memora's own `tmdb-search` Supabase
- * Edge Function, which holds the TMDB API key as a server-side
- * secret. This file, and therefore the client bundle, never contains
- * a TMDB credential. See supabase/functions/tmdb-search/index.ts.
+ * api.themoviedb.org -- it calls Memora's own Supabase Edge Functions
+ * (`tmdb-search`, `tmdb-details`), which hold the TMDB API key as a
+ * server-side secret. This file, and therefore the client bundle,
+ * never contains a TMDB credential.
  */
 export const TMDBRepository = {
   /**
@@ -13,16 +13,21 @@ export const TMDBRepository = {
    * @returns {Promise<{ data: { results: any[] }|null, error: Error|null }>}
    */
   async searchMulti(query) {
-  const result = await supabase.functions.invoke("tmdb-search", {
-    body: { query },
-  });
+    return supabase.functions.invoke("tmdb-search", { body: { query } });
+  },
 
-  searchDebug.set("repoReturned", result);
-  searchDebug.set(
-    "invokeError",
-    result.error ? debugFormat(result.error) : "null"
-  );
-
-  return result;
-},
+  /**
+   * Fetches (and server-side persists) full details for one title
+   * via the `tmdb-details` Edge Function. The function itself writes
+   * runtime / total_episodes / status into the `titles` row using
+   * the service role -- this client call just triggers it and
+   * receives the fields back for optional immediate display.
+   *
+   * @param {number} tmdbId
+   * @param {'movie'|'tv'} type
+   * @returns {Promise<{ data: { details: object, persisted: boolean }|null, error: Error|null }>}
+   */
+  async fetchDetails(tmdbId, type) {
+    return supabase.functions.invoke("tmdb-details", { body: { tmdb_id: tmdbId, type } });
+  },
 };

@@ -33,6 +33,42 @@ export const TMDBService = {
     const rows = Array.isArray(data?.results) ? data.results : [];
     return rows.slice(0, limit).map(toTitle);
   },
+
+  /**
+   * Triggers the `tmdb-details` Edge Function for one title. The
+   * function fetches TMDB's /movie/{id} or /tv/{id}, persists
+   * runtime / total_episodes / status into the `titles` row
+   * server-side (service role -- catalogue curation stays server-side,
+   * no client UPDATE policy needed), and returns the fields.
+   *
+   * Designed to be safe to call fire-and-forget: throws AppError on
+   * failure like every other service method, but callers doing
+   * best-effort enrichment can simply .catch(logError) -- a failed
+   * enrichment must never break adding a title (same philosophy as
+   * ActivityService.log).
+   *
+   * @param {number} tmdbId
+   * @param {'movie'|'tv'} type
+   * @returns {Promise<{ runtime: number|null, totalEpisodes: number|null, numberOfSeasons: number|null, status: string|null, persisted: boolean }>}
+   */
+  async fetchAndPersistDetails(tmdbId, type) {
+    if (typeof tmdbId !== "number" || (type !== "movie" && type !== "tv")) {
+      throw toAppError(new Error("fetchAndPersistDetails: invalid tmdbId/type"), "Couldn't load title details.");
+    }
+
+    const { data, error } = await TMDBRepository.fetchDetails(tmdbId, type);
+    if (error) throw toAppError(error, "Couldn't load title details.");
+    if (data?.error) throw toAppError(new Error(data.error), "Couldn't load title details.");
+
+    const d = data?.details || {};
+    return {
+      runtime: typeof d.runtime === "number" ? d.runtime : null,
+      totalEpisodes: typeof d.total_episodes === "number" ? d.total_episodes : null,
+      numberOfSeasons: typeof d.number_of_seasons === "number" ? d.number_of_seasons : null,
+      status: typeof d.status === "string" ? d.status : null,
+      persisted: !!data?.persisted,
+    };
+  },
 };
 
 /**
@@ -50,8 +86,10 @@ function toTitle(row) {
     originalTitle: row.original_title || null,
     type: row.type,
     // The search endpoint doesn't return genre names or episode
-    // counts -- only a details-endpoint call would. Left null until
-    // that's added; not required for search/add to work.
+    // counts -- the tmdb-details Edge Function fills in runtime /
+    // total_episodes / status after a title is added (see
+    // fetchAndPersistDetails above). Genre names would need a
+    // genre-id mapping and remain null for TMDB-sourced titles.
     genre: null,
     totalEpisodes: null,
     posterUrl: row.poster_url || null,
