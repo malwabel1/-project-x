@@ -76,6 +76,17 @@ function MemoraApp({ user, onSignOut }) {
     setDetailsEntry(null);
   }
 
+  // Called by TitleDetailsScreen after a successful status save.
+  // Freshness on back-navigation is already guaranteed structurally:
+  // the <div key={screen}> wrapper below remounts whichever screen
+  // you return to, so Home/Library refetch on every return. This
+  // handler adds the one thing remounting doesn't cover -- if the
+  // person returns to Library, bumping libraryKey ensures it also
+  // resets to a clean instance rather than restoring prior state.
+  function handleDetailsStatusChanged() {
+    setLibraryKey((k) => k + 1);
+  }
+
   return (
     <>
       <header style={styles.header}>
@@ -113,7 +124,14 @@ function MemoraApp({ user, onSignOut }) {
           {screen === "search" && <SearchScreen userId={user.id} />}
           {screen === "profile" && <ProfileScreen user={user} />}
           {screen === "settings" && <SettingsScreen onSignOut={onSignOut} />}
-          {screen === "details" && detailsEntry && <TitleDetailsScreen entry={detailsEntry} onBack={closeDetailsScreen} />}
+          {screen === "details" && detailsEntry && (
+            <TitleDetailsScreen
+              entry={detailsEntry}
+              userId={user.id}
+              onBack={closeDetailsScreen}
+              onStatusChanged={handleDetailsStatusChanged}
+            />
+          )}
         </div>
       </main>
 
