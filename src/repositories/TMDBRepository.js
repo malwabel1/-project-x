@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabaseClient";
-
+import { searchDebug, debugFormat } from "../utils/searchDebug"; // TEMPORARY debug
 /**
  * Repository layer for TMDB access. Notably, this does NOT call
  * api.themoviedb.org — it calls Memora's own `tmdb-search` Supabase
@@ -13,6 +13,16 @@ export const TMDBRepository = {
    * @returns {Promise<{ data: { results: any[] }|null, error: Error|null }>}
    */
   async searchMulti(query) {
-    return supabase.functions.invoke("tmdb-search", { body: { query } });
-  },
+  const result = await supabase.functions.invoke("tmdb-search", {
+    body: { query },
+  });
+
+  searchDebug.set("repoReturned", result);
+  searchDebug.set(
+    "invokeError",
+    result.error ? debugFormat(result.error) : "null"
+  );
+
+  return result;
+},
 };

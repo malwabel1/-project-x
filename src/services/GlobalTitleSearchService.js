@@ -1,7 +1,7 @@
 import { GlobalTitleSearchRepository } from "../repositories/GlobalTitleSearchRepository";
 import { TMDBService } from "./TMDBService";
 import { toAppError, logError } from "../utils/errors";
-
+import { searchDebug } from "../utils/searchDebug"; // TEMPORARY debug
 /**
  * Service for "search mode 2": searching the global title catalogue,
  * as opposed to UserLibraryService.getPage's "search mode 1", which
@@ -27,6 +27,10 @@ export const GlobalTitleSearchService = {
    */
   async search(query, { limit = 20 } = {}) {
     const trimmed = (query || "").trim();
+    searchDebug.set(
+  "serviceCalled",
+  `"${trimmed}" @ ${new Date().toISOString().slice(11, 23)}`
+); // TEMPORARY debug
     if (!trimmed) return [];
 
     try {

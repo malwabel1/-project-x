@@ -4,7 +4,7 @@ import { styles } from "../styles";
 import { useGlobalTitleSearch } from "../hooks/useGlobalTitleSearch";
 import { LoadingState, ErrorBanner } from "./StateViews";
 import { PosterImage } from "./PosterImage";
-
+import { SearchDebugPanel } from "./SearchDebugPanel";
 /**
  * Rendered inside TitleForm when the person switches to "Search"
  * mode. Every result's Add button calls `onAdd(title)`, where `title`
@@ -26,7 +26,7 @@ export function GlobalSearchTab({ onAdd, adding }) {
         placeholder="Search movies & TV shows…"
         aria-label="Search movies and TV shows"
       />
-
+<SearchDebugPanel query={query} />
       <ErrorBanner message={error} />
 
       {loading ? (
